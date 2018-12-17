@@ -1,14 +1,18 @@
 'use strict'
 
-import {DeviceEventEmitter, NativeModules} from 'react-native';
+import { DeviceEventEmitter, NativeModules} from 'react-native';
 
 const googleFit = NativeModules.RNGoogleFit;
 
 class RNGoogleFit {
     eventListeners = []
 
-    authorize() {
+    authorize = () => {
         googleFit.authorize();
+    }
+
+    disconnect = () => {
+      googleFit.disconnect();
     }
 
     removeListeners = () => {
@@ -17,25 +21,27 @@ class RNGoogleFit {
     }
 
     /**
-     * Start recording fitness data (steps, distance)
+     * Start recording fitness data
+     * 
+     * You could specify data by array dataTypes. Possible values - step, distance, activity which corresponds
+     * DataTypes.TYPE_STEP_CUMULATIVE, DataType.TYPE_DISTANCE_DELTA and DataType.TYPE_ACTIVITIES_SAMPLES
+     * 
+     * Default value for dataTypes is steps and distance data
+     *
      * This function relies on sending events to signal the RecordingAPI status
      * Simply create an event listener for the {DATA_TYPE}_RECORDING (ex. STEP_RECORDING)
      * and check for {recording: true} as the event data
      */
-    startRecording = (callback) => {
-        googleFit.startFitnessRecording();
+    startRecording = (callback, dataTypes = ['step', 'distance']) => {
+        googleFit.startFitnessRecording(dataTypes);
 
-        const recordingObserver = DeviceEventEmitter.addListener(
-            'STEP_RECORDING',
-            (steps) => callback(steps));
+        const eventListeners = dataTypes.map(dataTypeName => {
+            const eventName = `${dataTypeName.toUpperCase()}_RECORDING`;
 
-        const distanceObserver = DeviceEventEmitter.addListener(
-            'DISTANCE_RECORDING',
-            (distance) => callback(distance));
+            return DeviceEventEmitter.addListener(eventName, event => callback(event));
+        });
 
-        // TODO: add mote activity listeners
-
-        this.eventListeners.push(recordingObserver, distanceObserver)
+        this.eventListeners.push(...eventListeners);
     }
 
     //Will be deprecated in future releases
@@ -132,6 +138,21 @@ class RNGoogleFit {
             });
     }
 
+    getActivitySamples(options, callback) {
+        googleFit.getActivitySamples(
+            options.startDate,
+            options.endDate,
+            (error) => {
+                callback(error, false);
+            },
+            (res) => {
+                if (res.length>0) {
+                    callback(false, res);
+                } else {
+                    callback("There is no any distance data for this period", false);
+                }
+            });
+    }
 
     /**
      * Get the total calories per day over a specified date range.
@@ -209,9 +230,45 @@ class RNGoogleFit {
             });
     }
 
-    saveWeight = (options, callback) => {
-        if (options.unit === 'pound') {
-            options.value = this.lbsAndOzToK({pounds: options.value, ounces: 0}); //convert pounds and ounces to kg
+    getHeightSamples(options, callback) {
+      let startDate = Date.parse(options.startDate);
+      let endDate = Date.parse(options.endDate);
+      googleFit.getHeightSamples( startDate,
+        endDate,
+        (msg) => {
+          callback(msg, false);
+        },
+        (res) => {
+          if (res.length>0) {
+            res = res.map((el) => {
+              if (el.value) {
+                el.startDate = new Date(el.startDate).toISOString();
+                el.endDate = new Date(el.endDate).toISOString();
+                return el;
+              }
+            });
+            callback(false, res.filter(day => day != undefined));
+          } else {
+            callback("There is no any height data for this period", false);
+          }
+        });
+    }
+
+    saveHeight(options, callback) {
+      options.date = Date.parse(options.date);
+      googleFit.saveHeight(options,
+        (msg) => {
+          callback(msg, false);
+        },
+        (res) => {
+          callback(false, res);
+
+        });
+    }
+
+    saveWeight(options, callback) {
+        if (options.unit == 'pound') {
+            options.value = this.lbsAndOzToK({ pounds: options.value, ounces: 0 }); //convert pounds and ounces to kg
         }
         options.date = Date.parse(options.date);
         googleFit.saveWeight(options,
@@ -237,6 +294,17 @@ class RNGoogleFit {
             });
     }
 
+    deleteHeight = (options, callback) => {
+      options.date = Date.parse(options.date);
+      googleFit.deleteWeight(options,
+        (msg) => {
+          callback(msg, false);
+        },
+        (res) => {
+          callback(false, res);
+        });
+    }
+
     isAvailable(callback) { // true if GoogleFit installed
         googleFit.isAvailable(
             (msg) => {
@@ -255,6 +323,10 @@ class RNGoogleFit {
             (res) => {
                 callback(false, res);
             });
+    }
+
+    openFit() {
+        googleFit.openFit();
     }
 
     observeSteps = (callback) => {
